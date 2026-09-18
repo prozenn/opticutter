@@ -42,12 +42,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import {
   uid,
   emptyData,
-  demoData,
   validate,
   planCuts,
   completePlan,
   cuttingLists,
   createSnapshot,
+  archivePlan,
 } from '@/lib/planner.mjs';
 import { renderPrintHTML } from '@/lib/print.mjs';
 const KEY = 'opticutter-v1';
@@ -121,16 +121,17 @@ export default function Home() {
     setPrintReady(false);
     setTab('archive');
   }
-  function prepareDocument(kind, persist = false) {
+  function prepareDocument(persist = false) {
     try {
+      if (!plan) throw Error('Najpierw oblicz plan cięcia.');
       const snapshot = createSnapshot(
-        kind === 'plan' ? data : dataWithEdits(),
+        data,
         listMaterialId,
         documentName,
-        kind === 'plan' ? plan : null,
+        plan,
       );
       if (persist) {
-        const next = { ...data, archive: [snapshot, ...(data.archive || [])] };
+        const next = archivePlan(data, snapshot);
         const previousPlan = plan;
         if (!save(next)) return;
         if (previousPlan)
@@ -246,7 +247,7 @@ export default function Home() {
       setData(next);
       setPlan(null);
       setError('');
-      setNotice('Zapisano na tym urządzeniu.');
+      setNotice('');
       return true;
     } catch (e) {
       setError(e.message || 'Nie udało się zapisać danych.');
@@ -549,7 +550,7 @@ export default function Home() {
           <TableHead>Długość (mm)</TableHead>
           <TableHead>Ilość (szt.)</TableHead>
           <TableHead>Opis odcinka</TableHead>
-          <TableHead>Zmiany</TableHead>
+          <TableHead><span className="sr-only">Edycja</span></TableHead>
           <TableHead>
             <span className="sr-only">Usuń</span>
           </TableHead>
@@ -603,13 +604,13 @@ export default function Home() {
                   <Button
                     type="button"
                     onClick={() => saveRow(row)}
-                    aria-label={`Zapisz pozycję ${index + 1}`}
+                    aria-label={`Zastosuj zmiany pozycji ${index + 1}`}
                   >
                     <Check size={16} />
-                    Zapisz
+                    Zastosuj
                   </Button>
                 ) : (
-                  <span className="saved-cell">Zapisano</span>
+                  null
                 )}
               </TableCell>
               <TableCell>
@@ -686,10 +687,10 @@ export default function Home() {
           <em>1D</em>
         </a>
         <div className="header-right">
-          <span className="local-dot" /> Magazyn lokalny{' '}
+          <details className="data-menu"><summary>Kopia danych</summary><div className="data-menu-content">
           <Button variant="outline" onClick={exportData} disabled={!ready}>
             <Download size={16} />
-            Kopia danych
+            Pobierz kopię
           </Button>
           <label className="import-button">
             <Upload size={16} />
@@ -700,14 +701,14 @@ export default function Home() {
               onChange={importData}
             />
           </label>
+          </div></details>
         </div>
       </header>
       <main>
         <div className="page-heading">
           <div>
-            <p className="eyebrow">WARSZTAT / CIĘCIE NA DŁUGOŚĆ</p>
-            <h1>Dobry plan. Mniej odpadu.</h1>
-            <p>Najpierw wykorzystaj materiał, który już masz.</p>
+            <h1>Zaplanuj cięcie</h1>
+            <p>Wybierz materiał, dodaj odcinki i oblicz gotowy plan.</p>
           </div>
           <div className="unit">
             <Ruler size={18} /> Wszystkie wymiary w mm
@@ -723,59 +724,16 @@ export default function Home() {
             {notice}
           </div>
         )}
-        <div className="stats">
-          <div>
-            <span>Materiał w magazynie</span>
-            <strong>
-              {data.stock.reduce((s, r) => s + r.quantity, 0)}{' '}
-              <small>szt.</small>
-            </strong>
-          </div>
-          <div>
-            <span>W tym pozostałości</span>
-            <strong>
-              {data.stock
-                .filter((r) => r.kind === 'remnant')
-                .reduce((s, r) => s + r.quantity, 0)}{' '}
-              <small>szt.</small>
-            </strong>
-          </div>
-          <div>
-            <span>Odcinki do wycięcia</span>
-            <strong>
-              {data.orders.reduce((s, r) => s + r.quantity, 0)}{' '}
-              <small>szt.</small>
-            </strong>
-          </div>
-          <div>
-            <span>Łączna długość zamówienia</span>
-            <strong>
-              {mm(
-                data.orders.reduce((s, r) => s + r.length * r.quantity, 0) /
-                  1000,
-              )}{' '}
-              <small>m</small>
-            </strong>
-          </div>
-        </div>
         <Tabs value={tab} onValueChange={setTab}>
           <div className="tabbar">
             <TabsList className="tablist">
-              <TabsTrigger value="order">
-                01 <span>Zamówienie</span>
-              </TabsTrigger>
-              <TabsTrigger value="stock">
-                02 <span>Magazyn</span>
-              </TabsTrigger>
-              <TabsTrigger value="plan">
-                03 <span>Plan cięcia</span>
-              </TabsTrigger>
-              <TabsTrigger value="archive">
-                04 <span>Archiwum / wydruk</span>
-              </TabsTrigger>
+              <TabsTrigger value="order"><span>Odcinki</span></TabsTrigger>
+              <TabsTrigger value="plan" disabled={!plan}><span>Wynik</span></TabsTrigger>
+              <TabsTrigger value="stock"><span>Magazyn</span></TabsTrigger>
+              <TabsTrigger value="archive"><span>Zapisane plany</span></TabsTrigger>
             </TabsList>
             <span className="saved">
-              {ready ? 'Zapis automatyczny w przeglądarce' : 'Odczyt danych…'}
+              {ready ? 'Dane na tym urządzeniu' : 'Odczyt danych…'}
             </span>
           </div>
           <TabsContent value="order">
@@ -796,13 +754,7 @@ export default function Home() {
                     Dodaj pierwszy materiał
                     <ArrowRight size={16} />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={!ready}
-                    onClick={() => save(demoData())}
-                  >
-                    lub wczytaj dane przykładowe
-                  </Button>
+
                 </div>
               )}
               {data.materials.length > 0 && (
@@ -820,59 +772,21 @@ export default function Home() {
                     />
                   </label>
                   <p>
-                    Wybór materiału otwiera jego osobną listę. Pozostałe listy
-                    pozostają zapisane.
+                    Długość sztangi do zakupu: {mm(material(listMaterialId)?.purchaseLength || 0)} mm. Najpierw wykorzystamy zapasy.
                   </p>
                 </div>
               )}
-              {data.materials.length > 0 && (
-                <div className="document-actions">
-                  <label className="field grow">
-                    Nazwa zapisu (opcjonalnie)
-                    <input
-                      value={documentName}
-                      onChange={(e) => setDocumentName(e.target.value)}
-                      maxLength={100}
-                      placeholder="np. Rama hali — zlecenie 24"
-                    />
-                  </label>
-                  <Button
-                    variant="outline"
-                    disabled={!ready || !listRows.length}
-                    onClick={() => prepareDocument('list', true)}
-                  >
-                    Zapisz listę
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={!ready || !listRows.length}
-                    onClick={() => prepareDocument('list')}
-                  >
-                    <Printer size={16} />
-                    Drukuj listę
-                  </Button>
-                </div>
-              )}
               {rowForm('orders')}
-              <p className="keyboard-hint">
-                Długość → <kbd>Tab</kbd> ilość → <kbd>Enter</kbd> dodaje i wraca
-                do długości. W tabeli edytuj pola i zatwierdź <kbd>Enter</kbd>{' '}
-                lub „Zapisz”; <kbd>Esc</kbd> cofa zmiany w wierszu.
-              </p>
+              <p className="keyboard-hint">Wpisz długość i ilość. <kbd>Enter</kbd> dodaje odcinek.</p>
               {listRows.length ? (
                 orderTable
               ) : (
-                <p className="empty-line">Lista odcinków jest pusta.</p>
+                <p className="empty-line">Dodaj pierwszy odcinek powyżej, aby obliczyć plan.</p>
               )}
             </section>
-            <section className="settings">
-              <div>
-                <h2>Parametry cięcia</h2>
-                <p>
-                  Rzaz jest doliczany przy każdym odcięciu. Idealne dopasowanie
-                  końca nie wymaga rzazu.
-                </p>
-              </div>
+            <details className="cut-settings">
+              <summary>Ustawienia cięcia <span>Rzaz {mm(data.kerf)} mm · zachowaj od {mm(data.minRemnant)} mm</span></summary>
+              <div className="settings">
               <Num
                 label="Szerokość rzazu (mm)"
                 min="0"
@@ -889,6 +803,10 @@ export default function Home() {
                   save({ ...data, minRemnant: Number(e.target.value) })
                 }
               />
+              </div>
+            </details>
+            <section className="calculate-bar">
+              <p>{listRows.reduce((sum, row) => sum + Number((drafts[row.id] || row).quantity || 0), 0)} odcinków do wycięcia</p>
               <Button
                 className="primary-large"
                 disabled={!ready || !listRows.length}
@@ -901,7 +819,8 @@ export default function Home() {
             </section>
           </TabsContent>
           <TabsContent value="stock">
-            <section className="panel">
+            <details className="panel material-settings">
+              <summary>Materiały i przekroje · dodaj lub usuń</summary>
               <div className="panel-heading">
                 <div>
                   <h2>Materiały i przekroje</h2>
@@ -961,7 +880,7 @@ export default function Home() {
                   </div>
                 ))}
               </div>
-            </section>
+            </details>
             <section className="panel">
               <div className="panel-heading">
                 <div>
@@ -1021,6 +940,7 @@ export default function Home() {
               </section>
             ) : (
               <>
+                <Button variant="ghost" onClick={() => setTab('order')}>← Edytuj odcinki</Button>
                 <div className="plan-top">
                   <div>
                     <h2>Plan: {title(plan.materialId)}</h2>
@@ -1033,14 +953,14 @@ export default function Home() {
                     <Button
                       variant="outline"
                       disabled={!!plan.missing.length}
-                      onClick={() => prepareDocument('plan', true)}
+                      onClick={() => prepareDocument(true)}
                     >
                       Zapisz plan
                     </Button>
                     <Button
                       variant="outline"
                       disabled={!!plan.missing.length}
-                      onClick={() => prepareDocument('plan')}
+                      onClick={() => prepareDocument()}
                     >
                       <Printer size={16} />
                       Drukuj plan
@@ -1201,6 +1121,15 @@ export default function Home() {
                       pozostałości.
                     </p>
                   </div>
+                  <label className="field plan-name">
+                    Nazwa planu (opcjonalnie)
+                    <input
+                      value={documentName}
+                      onChange={(e) => setDocumentName(e.target.value)}
+                      maxLength={100}
+                      placeholder="np. Rama hali"
+                    />
+                  </label>
                   <Button
                     className="primary-large"
                     disabled={!plan.bars.length || plan.missing.length > 0}
@@ -1222,7 +1151,7 @@ export default function Home() {
             <section className="panel">
               <div className="panel-heading">
                 <div>
-                  <h2>Zapisane listy i plany</h2>
+                  <h2>Zapisane plany</h2>
                   <p>
                     Zapisy zachowują materiał i odcinki z chwili zapisu. Możesz
                     je przeglądać i ponownie drukować.
@@ -1279,8 +1208,7 @@ export default function Home() {
                 </Table>
               ) : (
                 <p className="empty-line">
-                  Brak zapisów. Użyj „Zapisz listę” w zamówieniu lub „Zapisz
-                  plan” przy gotowym planie.
+                  Nie masz jeszcze zapisanych planów. Dodaj odcinki, oblicz wynik i wybierz „Zapisz plan”.
                 </p>
               )}
             </section>
